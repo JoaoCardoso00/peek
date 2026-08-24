@@ -66,11 +66,12 @@ async function createShare(
   bindings: DiscordBindings,
   background: (promise: Promise<unknown>) => void
 ): Promise<Response> {
-  if (!bindings.DISCORD_GUILD_ID) {
-    return ephemeral("The Peek bot is missing its Discord guild ID.");
+  const guildIds = configuredGuildIds(bindings);
+  if (guildIds.size === 0) {
+    return ephemeral("The Peek bot is missing its Discord guild allowlist.");
   }
-  if (interaction.guild_id !== bindings.DISCORD_GUILD_ID) {
-    return ephemeral("This private Peek bot only works in its configured server.");
+  if (!interaction.guild_id || !guildIds.has(interaction.guild_id)) {
+    return ephemeral("This private Peek bot only works in its configured servers.");
   }
   if (!bindings.DISCORD_BOT_TOKEN || !interaction.channel_id) {
     return ephemeral("The Peek bot is missing its bot token or cannot see this channel.");
@@ -97,6 +98,14 @@ async function createShare(
       allowed_mentions: { parse: [] }
     }
   });
+}
+
+function configuredGuildIds(bindings: Pick<PeekOptionalVars, "DISCORD_GUILD_ID" | "DISCORD_GUILD_IDS">): Set<string> {
+  return new Set(
+    [bindings.DISCORD_GUILD_ID, ...(bindings.DISCORD_GUILD_IDS ?? "").split(/[\s,]+/)]
+      .map((guildId) => guildId?.trim())
+      .filter((guildId): guildId is string => Boolean(guildId))
+  );
 }
 
 async function publishRoom(

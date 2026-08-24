@@ -22,7 +22,7 @@ describe("Discord interactions", () => {
     const publicKey = hex(new Uint8Array(await crypto.subtle.exportKey("raw", keys.publicKey)));
     const bindings = {
       DISCORD_PUBLIC_KEY: publicKey,
-      DISCORD_GUILD_ID: "friends",
+      DISCORD_GUILD_IDS: "friends, second-server",
       ROOMS: {} as DurableObjectNamespace<RoomDO>
     };
 
@@ -45,7 +45,25 @@ describe("Discord interactions", () => {
     const outsiderResponse = await handleDiscordInteraction(outsider, bindings, () => undefined);
     expect(await outsiderResponse.json()).toMatchObject({
       type: 4,
-      data: { content: "This private Peek bot only works in its configured server." }
+      data: { content: "This private Peek bot only works in its configured servers." }
+    });
+
+    const allowed = await signedRequest(
+      {
+        type: 2,
+        id: "1",
+        application_id: "2",
+        token: "x",
+        guild_id: "second-server",
+        channel_id: "3",
+        data: { name: "share" }
+      },
+      keys.privateKey
+    );
+    const allowedResponse = await handleDiscordInteraction(allowed, bindings, () => undefined);
+    expect(await allowedResponse.json()).toMatchObject({
+      type: 4,
+      data: { content: "The Peek bot is missing its bot token or cannot see this channel." }
     });
   });
 

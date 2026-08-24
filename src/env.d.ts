@@ -10,6 +10,8 @@ interface PeekOptionalVars {
   CF_TURN_API_TOKEN?: string;
   DISCORD_PUBLIC_KEY?: string;
   DISCORD_BOT_TOKEN?: string;
+  DISCORD_GUILD_IDS?: string;
+  // Kept for existing deployments while they migrate to DISCORD_GUILD_IDS.
   DISCORD_GUILD_ID?: string;
 }
 

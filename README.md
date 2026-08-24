@@ -1,6 +1,6 @@
 # peek
 
-Share your screen with one link. Two clicks for the person sharing, zero logins for everyone watching. This version is a private Discord bot for one friend group.
+Share your screen with one link. Two clicks for the person sharing, zero logins for everyone watching. This version uses a Discord guild allowlist for private groups.
 
 ## How it works
 
@@ -20,23 +20,29 @@ The operating system's screen picker opens in the browser. Discord does not let 
 ### Configure the private bot
 
 1. Create an application in the [Discord Developer Portal](https://discord.com/developers/applications). Copy its Application ID and Public Key.
-2. Open Bot, create or reset the token, and keep it private. Leave Public Bot disabled.
-3. In Discord, enable Developer Mode under User Settings, Advanced. Right-click your server and copy its Server ID.
+2. Open Bot, create or reset the token, and keep it private. You can leave Public Bot disabled if you manage every server that will install Peek. Enable it if other server admins need to install the bot for you.
+3. In Discord, enable Developer Mode under User Settings, Advanced. Right-click each allowed server and copy its Server ID.
 4. Create the local configuration:
 
 ```sh
 cp .dev.vars.example .dev.vars
 ```
 
-Fill in all four values in `.dev.vars`. Git ignores that file.
+Fill in all four values in `.dev.vars`. Put the allowed server IDs in one comma-separated value:
 
-5. Register `/share` only in your server:
+```dotenv
+DISCORD_GUILD_IDS=123456789012345678,234567890123456789
+```
+
+Git ignores `.dev.vars`.
+
+5. Run the registration script to print the install URL:
 
 ```sh
 pnpm discord:register
 ```
 
-The script replaces this app's guild commands and prints its install URL. Open that URL and add the bot to your server.
+Open the URL and add the bot to every allowed server. Run `pnpm discord:register` again after installation. The script replaces this app's guild commands in each allowlisted server. Rerun it whenever you add or remove a server ID. Removing an ID stops the Worker from accepting commands there, but you should also remove the bot from that server.
 
 ### Deploy to Cloudflare
 
@@ -46,7 +52,7 @@ Log in, add the private bot settings, and deploy:
 pnpm exec wrangler login
 pnpm exec wrangler secret put DISCORD_PUBLIC_KEY
 pnpm exec wrangler secret put DISCORD_BOT_TOKEN
-pnpm exec wrangler secret put DISCORD_GUILD_ID
+pnpm exec wrangler secret put DISCORD_GUILD_IDS
 pnpm deploy
 ```
 
@@ -58,7 +64,7 @@ Back in the Discord Developer Portal, open General Information and set the Inter
 https://YOUR_PEEK_DOMAIN/api/discord/interactions
 ```
 
-Discord sends a signed ping to verify the endpoint. Run `/share` in your server after it accepts the URL.
+Discord sends a signed ping to verify the endpoint. Run `/share` in an allowed server after it accepts the URL.
 
 ### Add TURN fallback
 
@@ -111,7 +117,8 @@ Optional variables (set in `wrangler.jsonc` `vars`, or as secrets with `wrangler
 | `STUN_URL` | Replace the default Google STUN server. |
 | `DISCORD_PUBLIC_KEY` | Verifies that interactions came from Discord. |
 | `DISCORD_BOT_TOKEN` | Posts and updates the public room card. |
-| `DISCORD_GUILD_ID` | Restricts `/share` to your Discord server. |
+| `DISCORD_GUILD_IDS` | Comma-separated allowlist of Discord server IDs. |
+| `DISCORD_GUILD_ID` | Legacy single-server setting. It can be used alongside the allowlist during migration. |
 
 Without TURN, viewers behind symmetric NATs (some mobile carriers, some university networks) will not connect. Cloudflare's TURN has a free tier that covers a friend group.
 
