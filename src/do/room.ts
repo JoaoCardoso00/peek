@@ -58,7 +58,9 @@ const DEFAULT_STATE: RoomState = {
   startedAt: null
 };
 
-export const MAX_VIEWERS = 50;
+// This is a private friend-group deployment. The connection cap also bounds
+// how much already-issued TURN traffic can continue after the 750 GB cutoff.
+export const MAX_VIEWERS = 10;
 /** Durable Object storage caps a single value at 128 KiB. */
 export const MAX_THUMB_BYTES = 120_000;
 const IDLE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -226,6 +228,15 @@ export class RoomDO extends DurableObject<Env> {
     }
 
     const existing = this.viewerSockets();
+    if (existing.length >= MAX_VIEWERS) {
+      // Accept long enough to deliver a protocol error, but do not tag or attach
+      // this socket as a viewer. It must never enter presence or TURN bounds.
+      this.ctx.acceptWebSocket(server);
+      this.send(server, { type: "error", code: "full", message: "This stream is full." });
+      server.close(1008, "full");
+      return new Response(null, { status: 101, webSocket: client });
+    }
+
     const id = crypto.randomUUID();
     const requestedViewerKey = url.searchParams.get("viewer") ?? "";
     const viewerKey = VIEWER_KEY.test(requestedViewerKey) ? requestedViewerKey : id;
@@ -238,12 +249,6 @@ export class RoomDO extends DurableObject<Env> {
     };
     server.serializeAttachment(att);
     this.ctx.acceptWebSocket(server, ["viewer"]);
-
-    if (existing.length >= MAX_VIEWERS) {
-      this.send(server, { type: "error", code: "full", message: "This stream is full." });
-      server.close(1008, "full");
-      return new Response(null, { status: 101, webSocket: client });
-    }
 
     const state = await this.state();
     this.send(server, this.stateFrame(state, viewerKey));

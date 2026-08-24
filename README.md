@@ -70,15 +70,20 @@ Discord sends a signed ping to verify the endpoint. Run `/share` in an allowed s
 
 Direct WebRTC should handle most connections. TURN covers mobile carriers, university networks, and restrictive routers that cannot connect directly.
 
-Create a Cloudflare Realtime TURN key, then add its key ID and API token:
+Create a Cloudflare Realtime TURN key. Also create a Cloudflare API token with
+`Account Analytics: Read` for this account. Then add all four values:
 
 ```sh
 pnpm exec wrangler secret put CF_TURN_KEY_ID
 pnpm exec wrangler secret put CF_TURN_API_TOKEN
+pnpm exec wrangler secret put CF_ACCOUNT_ID
+pnpm exec wrangler secret put CF_ANALYTICS_API_TOKEN
 pnpm deploy
 ```
 
-Peek requests short-lived TURN credentials automatically. The stream remains direct P2P whenever TURN is unnecessary.
+Peek checks the previous 31 days of TURN egress before issuing a two-hour credential. At 750 GB it returns STUN only, so direct P2P still works but relayed viewers cannot join. If the analytics check fails, it also returns STUN only. The ceiling leaves 250 GB for analytics delay and credentials that were already issued. Rooms accept at most 10 viewer connections, which bounds the traffic that can continue on existing credentials. `TURN_EGRESS_LIMIT_GB` can lower the ceiling but cannot raise it above 750 GB.
+
+TURN credentials are only issued while the requested room is live. The stream remains direct P2P whenever ICE can establish a direct connection.
 
 ## Stack
 
@@ -112,7 +117,9 @@ Optional variables (set in `wrangler.jsonc` `vars`, or as secrets with `wrangler
 | Name | Purpose |
 | --- | --- |
 | `PUBLIC_URL` | Force the origin used in embed image URLs (only needed behind an unusual proxy). |
-| `CF_TURN_KEY_ID`, `CF_TURN_API_TOKEN` | Cloudflare Realtime TURN. `/api/ice` mints short-lived credentials. Make the token a secret. |
+| `CF_TURN_KEY_ID`, `CF_TURN_API_TOKEN` | Cloudflare Realtime TURN key. `/api/ice` mints short-lived credentials. Make both secrets. |
+| `CF_ACCOUNT_ID`, `CF_ANALYTICS_API_TOKEN` | Required spending guard. The token needs `Account Analytics: Read`. TURN stays off if the usage check fails. |
+| `TURN_EGRESS_LIMIT_GB` | TURN cutoff over the previous 31 days. Defaults to 750 and cannot exceed 750. |
 | `TURN_URL`, `TURN_USERNAME`, `TURN_CREDENTIAL` | Any other TURN provider. `TURN_URL` can be a comma-separated list. |
 | `STUN_URL` | Replace the default Google STUN server. |
 | `DISCORD_PUBLIC_KEY` | Verifies that interactions came from Discord. |

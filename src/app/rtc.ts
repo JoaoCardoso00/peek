@@ -9,10 +9,12 @@ export const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
 
 let iceCache: RTCIceServer[] | null = null;
 
-export async function fetchIceServers(): Promise<RTCIceServer[]> {
-  if (iceCache) return iceCache;
+export async function fetchIceServers(roomId: string, force = false): Promise<RTCIceServer[]> {
+  if (iceCache && !force) return iceCache;
   try {
-    const response = await fetch("/api/ice", { cache: "no-store" });
+    const url = new URL("/api/ice", window.location.href);
+    url.searchParams.set("room", roomId);
+    const response = await fetch(url, { cache: "no-store" });
     if (!response.ok) throw new Error(`ICE endpoint returned ${response.status}`);
     const body = (await response.json()) as { iceServers?: RTCIceServer[] };
     iceCache = body.iceServers?.length ? body.iceServers : DEFAULT_ICE_SERVERS;
@@ -50,13 +52,31 @@ export function preferScreenCodecs(transceiver: RTCRtpTransceiver): void {
 }
 
 /** Buffers ICE candidates that arrive before the remote description is set. */
+export interface IceCandidateTarget {
+  readonly remoteDescription: RTCSessionDescriptionInit | null;
+  addIceCandidate(candidate?: RTCIceCandidateInit | null): Promise<void>;
+}
+
 export class CandidateQueue {
   private pending: RTCIceCandidateInit[] = [];
+  private pc: IceCandidateTarget | null;
 
-  constructor(private readonly pc: RTCPeerConnection) {}
+  constructor(pc?: IceCandidateTarget) {
+    this.pc = pc ?? null;
+  }
+
+  /** Attach after an offer arrives. Candidates received before the offer stay queued. */
+  attach(pc: IceCandidateTarget): void {
+    this.pc = pc;
+  }
+
+  detach(clear = true): void {
+    this.pc = null;
+    if (clear) this.pending = [];
+  }
 
   async add(candidate: RTCIceCandidateInit): Promise<void> {
-    if (this.pc.remoteDescription) {
+    if (this.pc?.remoteDescription) {
       await this.pc.addIceCandidate(candidate).catch(() => undefined);
     } else {
       this.pending.push(candidate);
@@ -64,6 +84,7 @@ export class CandidateQueue {
   }
 
   async flush(): Promise<void> {
+    if (!this.pc?.remoteDescription) return;
     const queued = this.pending;
     this.pending = [];
     for (const candidate of queued) {

@@ -21,13 +21,13 @@ export function useViewer(roomId: string, videoRef: React.RefObject<HTMLVideoEle
 
   const signalRef = useRef<Signal | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
-  const queueRef = useRef<CandidateQueue | null>(null);
+  const queueRef = useRef(new CandidateQueue());
   const iceRef = useRef<RTCIceServer[]>([]);
   const disconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const joinTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const automaticRetries = useRef(0);
 
-  const closePeer = useCallback(() => {
+  const closePeer = useCallback((clearCandidates = true) => {
     const pc = pcRef.current;
     if (pc) {
       pc.ontrack = null;
@@ -36,7 +36,7 @@ export function useViewer(roomId: string, videoRef: React.RefObject<HTMLVideoEle
       pc.close();
     }
     pcRef.current = null;
-    queueRef.current = null;
+    queueRef.current.detach(clearCandidates);
     if (disconnectTimer.current) clearTimeout(disconnectTimer.current);
     disconnectTimer.current = null;
     if (joinTimer.current) clearTimeout(joinTimer.current);
@@ -55,7 +55,7 @@ export function useViewer(roomId: string, videoRef: React.RefObject<HTMLVideoEle
       setError(
         hasTurn
           ? "Peek could not establish a media connection. Check the network and try again."
-          : "This network needs a TURN relay, but this Peek deployment does not have one configured."
+          : "No direct connection could be established, and TURN is unavailable for this Peek deployment."
       );
       setStatus("error");
       return;
@@ -99,13 +99,19 @@ export function useViewer(roomId: string, videoRef: React.RefObject<HTMLVideoEle
     async (sdp: RTCSessionDescriptionInit) => {
       const signal = signalRef.current;
       if (!signal) return;
-      closePeer();
+      // Keep candidates that trickled in before the offer. Dropping these can make
+      // a valid P2P path look like a network that requires TURN.
+      closePeer(false);
       setStatus("joining");
 
-      const pc = new RTCPeerConnection({ iceServers: iceRef.current });
-      const queue = new CandidateQueue(pc);
+      // An early viewer may have fetched ICE config while the room was still
+      // waiting. Refresh once the host is live so TURN can be issued safely.
+      const ice = hasTurnServer(iceRef.current) ? iceRef.current : await fetchIceServers(roomId, true);
+      iceRef.current = ice;
+      const pc = new RTCPeerConnection({ iceServers: ice });
+      const queue = queueRef.current;
+      queue.attach(pc);
       pcRef.current = pc;
-      queueRef.current = queue;
 
       pc.ontrack = (event) => {
         const stream = event.streams[0];
@@ -146,7 +152,7 @@ export function useViewer(roomId: string, videoRef: React.RefObject<HTMLVideoEle
         rejoin(true);
       }
     },
-    [attach, closePeer, rejoin]
+    [attach, closePeer, rejoin, roomId]
   );
 
   const handleFrame = useCallback(
@@ -171,7 +177,7 @@ export function useViewer(roomId: string, videoRef: React.RefObject<HTMLVideoEle
           const data = frame.data as { sdp?: RTCSessionDescriptionInit; candidate?: RTCIceCandidateInit };
           if (!data) return;
           if (data.sdp) void acceptOffer(data.sdp);
-          else if (data.candidate) void queueRef.current?.add(data.candidate);
+          else if (data.candidate) void queueRef.current.add(data.candidate);
           return;
         }
         case "ended":
@@ -210,7 +216,7 @@ export function useViewer(roomId: string, videoRef: React.RefObject<HTMLVideoEle
   useEffect(() => {
     setNameState(getName());
     let cancelled = false;
-    void fetchIceServers().then((ice) => {
+    void fetchIceServers(roomId).then((ice) => {
       if (cancelled) return;
       iceRef.current = ice;
       connect();

@@ -13,6 +13,10 @@
     // Set PUBLIC_URL to your custom domain if the embed image URLs come out wrong behind a proxy.
     // TURN: either CF_TURN_KEY_ID + CF_TURN_API_TOKEN (secret) for Cloudflare's TURN,
     // or TURN_URL + TURN_USERNAME + TURN_CREDENTIAL for any other provider.
+    // Cloudflare TURN also requires CF_ACCOUNT_ID + CF_ANALYTICS_API_TOKEN so the
+    // 31-day usage guard can fail closed before paid egress. This value may only
+    // lower the built-in 750 GB ceiling.
+    "TURN_EGRESS_LIMIT_GB": "750"
     // Discord: set DISCORD_PUBLIC_KEY, DISCORD_BOT_TOKEN, and DISCORD_GUILD_IDS
     // with `wrangler secret put` before deploying the private bot.
   }

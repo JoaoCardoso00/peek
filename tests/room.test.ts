@@ -128,6 +128,17 @@ describe("room signaling", () => {
     expect(new Set(connections.map(({ id }) => id)).size).toBe(2);
   });
 
+  it("caps a private room at ten viewer connections", async () => {
+    const room = "smallgroup";
+    for (let index = 0; index < 10; index += 1) {
+      const viewer = await open(room, "viewer", `Guest ${index + 1}`);
+      await viewer.until("state");
+    }
+    const overflow = await open(room, "viewer", "Guest 11");
+    await expect(overflow.until("error")).resolves.toMatchObject({ code: "full" });
+    expect(await snapshot(room)).toMatchObject({ viewers: 10 });
+  });
+
   it("refuses a second host with the wrong token, and hands over to the same token in a new tab", async () => {
     const room = "ownership";
     const host = await open(room, "host");

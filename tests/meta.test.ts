@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { CandidateQueue, type IceCandidateTarget } from "../src/app/rtc";
 import { iceServers } from "../src/lib/ice";
 import { metaTags, originOf, roomMeta } from "../src/lib/meta";
 import { safeName } from "../src/lib/names";
@@ -53,5 +54,103 @@ describe("iceServers", () => {
       TURN_CREDENTIAL: "p"
     });
     expect(withTurn[2]).toEqual({ urls: ["turn:a.example:3478", "turns:a.example:5349"], username: "u", credential: "p" });
+  });
+
+  it("fails closed when Cloudflare TURN usage cannot be verified", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const fetcher = vi.fn(async () => new Response("no", { status: 403 }));
+    const servers = await iceServers(
+      {
+        CF_TURN_KEY_ID: "turn-key",
+        CF_TURN_API_TOKEN: "turn-token",
+        CF_ACCOUNT_ID: "a".repeat(32),
+        CF_ANALYTICS_API_TOKEN: "analytics-token"
+      },
+      Date.UTC(2026, 7, 24),
+      fetcher
+    );
+    expect(servers.every((server) => !String(server.urls).startsWith("turn"))).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    log.mockRestore();
+  });
+
+  it("mints two-hour TURN credentials below the cutoff and removes browser-blocked port 53", async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes("/graphql")) {
+        return Response.json({
+          data: { viewer: { accounts: [{ usage: [{ sum: { egressBytes: 100_000_000_000 } }] }] } }
+        });
+      }
+      expect(JSON.parse(String(init?.body))).toEqual({ ttl: 7200 });
+      return Response.json({
+        iceServers: [
+          {
+            urls: [
+              "turn:turn.cloudflare.com:53?transport=udp",
+              "turn:turn.cloudflare.com:3478?transport=udp",
+              "turns:turn.cloudflare.com:5349?transport=tcp"
+            ],
+            username: "u",
+            credential: "p"
+          }
+        ]
+      });
+    });
+    const servers = await iceServers(
+      {
+        CF_TURN_KEY_ID: "turn-key",
+        CF_TURN_API_TOKEN: "turn-token",
+        CF_ACCOUNT_ID: "a".repeat(32),
+        CF_ANALYTICS_API_TOKEN: "analytics-token"
+      },
+      Date.UTC(2026, 7, 24),
+      fetcher
+    );
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(servers[2]).toEqual({
+      urls: ["turn:turn.cloudflare.com:3478?transport=udp", "turns:turn.cloudflare.com:5349?transport=tcp"],
+      username: "u",
+      credential: "p"
+    });
+  });
+
+  it("does not mint TURN credentials after 750 GB of egress", async () => {
+    const log = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fetcher = vi.fn(async () =>
+      Response.json({
+        data: { viewer: { accounts: [{ usage: [{ sum: { egressBytes: 750_000_000_000 } }] }] } }
+      })
+    );
+    const servers = await iceServers(
+      {
+        CF_TURN_KEY_ID: "turn-key",
+        CF_TURN_API_TOKEN: "turn-token",
+        CF_ACCOUNT_ID: "a".repeat(32),
+        CF_ANALYTICS_API_TOKEN: "analytics-token"
+      },
+      Date.UTC(2026, 7, 24),
+      fetcher
+    );
+    expect(servers).toHaveLength(2);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    log.mockRestore();
+  });
+});
+
+describe("CandidateQueue", () => {
+  it("keeps trickled candidates that arrive before the offer", async () => {
+    const added: RTCIceCandidateInit[] = [];
+    const target: IceCandidateTarget = {
+      remoteDescription: { type: "offer", sdp: "v=0" },
+      addIceCandidate: async (candidate) => {
+        if (candidate) added.push(candidate);
+      }
+    };
+    const queue = new CandidateQueue();
+    const candidate = { candidate: "candidate:1 1 udp 1 203.0.113.1 5000 typ srflx" };
+    await queue.add(candidate);
+    queue.attach(target);
+    await queue.flush();
+    expect(added).toEqual([candidate]);
   });
 });

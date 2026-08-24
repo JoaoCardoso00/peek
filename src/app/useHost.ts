@@ -257,7 +257,7 @@ export function useHost(roomId: string, token: string, videoRef: React.RefObject
         if (!pickerCancelled(err)) console.error(err);
         return null;
       }),
-      fetchIceServers()
+      fetchIceServers(roomId)
     ]);
     if (!stream) {
       setStatus("idle");
