@@ -1,0 +1,8 @@
+node_modules
+dist
+.wrangler
+.dev.vars
+.env
+public/banner.png
+worker-configuration.d.ts
+src/routeTree.gen.ts
