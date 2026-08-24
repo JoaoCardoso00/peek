@@ -6,6 +6,7 @@
 const ROOMS_KEY = "peek.rooms";
 const HOME_KEY = "peek.home";
 const NAME_KEY = "peek.name";
+const VIEWER_KEY = "peek.viewer";
 
 export interface Home {
   id: string;
@@ -75,6 +76,15 @@ export function setName(name: string): void {
   const trimmed = name.trim().slice(0, 32);
   if (trimmed) localStorage.setItem(NAME_KEY, trimmed);
   else localStorage.removeItem(NAME_KEY);
+}
+
+/** Stable across tabs so one browser profile appears as one viewer. */
+export function getOrCreateViewerKey(): string {
+  const existing = localStorage.getItem(VIEWER_KEY);
+  if (existing) return existing;
+  const viewerKey = randomString(22, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-");
+  localStorage.setItem(VIEWER_KEY, viewerKey);
+  return viewerKey;
 }
 
 // ---- stream settings ----

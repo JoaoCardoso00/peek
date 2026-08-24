@@ -6,11 +6,12 @@ type Frame = Record<string, unknown> & { type: string };
 const TOKEN = "hostsecret_hostsecret_hostsecret";
 
 /** Opens a WebSocket to the test worker and gives back a tiny inbox to await frames. */
-async function open(room: string, role: "host" | "viewer", name?: string) {
+async function open(room: string, role: "host" | "viewer", name?: string, viewerKey?: string) {
   const url = new URL("https://peek.test/ws");
   url.searchParams.set("room", room);
   url.searchParams.set("role", role);
   if (name) url.searchParams.set("name", name);
+  if (role === "viewer" && viewerKey) url.searchParams.set("viewer", viewerKey);
   const response = await SELF.fetch(url, { headers: { Upgrade: "websocket" } });
   expect(response.status).toBe(101);
   const ws = response.webSocket!;
@@ -107,6 +108,24 @@ describe("room signaling", () => {
       names = (frame.viewers as Array<{ name: string }>).map((v) => v.name).sort();
     }
     expect(names).toEqual(["A", "Bee"]);
+  });
+
+  it("counts tabs from the same browser once while signaling every connection", async () => {
+    const room = "sametabs";
+    const viewerKey = "same_browser_viewer_123";
+    const first = await open(room, "viewer", "Ana", viewerKey);
+    const second = await open(room, "viewer", "Ana", viewerKey);
+    expect(await first.until("state")).toMatchObject({ you: viewerKey });
+    expect(await second.until("state")).toMatchObject({ you: viewerKey });
+    expect(await snapshot(room)).toMatchObject({ viewers: 1 });
+
+    const host = await open(room, "host");
+    host.send({ type: "host", token: TOKEN, name: "Host", session: "tabs" });
+    const hosted = await host.until("hosted");
+    expect(hosted.viewers).toEqual([{ id: viewerKey, name: "Ana" }]);
+    const connections = hosted.connections as Array<{ id: string; name: string }>;
+    expect(connections).toHaveLength(2);
+    expect(new Set(connections.map(({ id }) => id)).size).toBe(2);
   });
 
   it("refuses a second host with the wrong token, and hands over to the same token in a new tab", async () => {

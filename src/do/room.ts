@@ -10,7 +10,7 @@ import { SESSION, TOKEN, hashToken, safeName, sameHash } from "../lib/names";
  * Wire protocol. Every frame is one JSON object with a `type`.
  *
  * Connect:  GET /ws?room=<id>&role=host
- *           GET /ws?room=<id>&role=viewer&name=<optional>
+ *           GET /ws?room=<id>&role=viewer&name=<optional>&viewer=<stable-browser-id>
  *
  * host   -> server : { type: "host", token, name, session }
  * both   -> server : { type: "signal", to?, data }      data = { sdp } | { candidate }
@@ -18,7 +18,7 @@ import { SESSION, TOKEN, hashToken, safeName, sameHash } from "../lib/names";
  * host   -> server : { type: "stop" }
  * both   -> server : "ping"                              answered with "pong" without waking the object
  *
- * server -> host   : { type: "hosted", viewers: Viewer[] }
+ * server -> host   : { type: "hosted", viewers: Viewer[], connections: ViewerConnection[] }
  * server -> host   : { type: "viewer-joined", id, name }
  * server -> host   : { type: "viewer-left", id }
  * server -> viewer : { type: "state", live, hostName, session, viewers: Viewer[], you }
@@ -42,8 +42,13 @@ interface RoomState {
 }
 
 type HostAttachment = { role: "host"; verified: boolean };
-type ViewerAttachment = { role: "viewer"; id: string; name: string };
+type ViewerAttachment = { role: "viewer"; id: string; viewerKey?: string; name: string };
 type Attachment = HostAttachment | ViewerAttachment;
+
+interface ViewerConnection {
+  id: string;
+  name: string;
+}
 
 const DEFAULT_STATE: RoomState = {
   tokenHash: null,
@@ -59,6 +64,7 @@ export const MAX_THUMB_BYTES = 120_000;
 const IDLE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_FRAME = 64 * 1024;
 const DISCORD_SYNC_DELAY_MS = 750;
+const VIEWER_KEY = /^[A-Za-z0-9_-]{16,64}$/;
 
 export class RoomDO extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -98,6 +104,15 @@ export class RoomDO extends DurableObject<Env> {
   }
 
   private viewers(): Viewer[] {
+    const unique = new Map<string, Viewer>();
+    for (const { att } of this.viewerSockets()) {
+      const viewerKey = att.viewerKey ?? att.id;
+      if (!unique.has(viewerKey)) unique.set(viewerKey, { id: viewerKey, name: att.name });
+    }
+    return [...unique.values()];
+  }
+
+  private viewerConnections(): ViewerConnection[] {
     return this.viewerSockets().map(({ att }) => ({ id: att.id, name: att.name }));
   }
 
@@ -146,7 +161,7 @@ export class RoomDO extends DurableObject<Env> {
       live: state.live,
       started: state.startedAt !== null,
       session: state.session,
-      viewers: this.viewerSockets().length,
+      viewers: this.viewers().length,
       hasThumb
     };
   }
@@ -211,10 +226,15 @@ export class RoomDO extends DurableObject<Env> {
     }
 
     const existing = this.viewerSockets();
+    const id = crypto.randomUUID();
+    const requestedViewerKey = url.searchParams.get("viewer") ?? "";
+    const viewerKey = VIEWER_KEY.test(requestedViewerKey) ? requestedViewerKey : id;
+    const sameViewer = existing.find(({ att }) => (att.viewerKey ?? att.id) === viewerKey);
     const att: ViewerAttachment = {
       role: "viewer",
-      id: crypto.randomUUID(),
-      name: safeName(url.searchParams.get("name"), `Guest ${existing.length + 1}`)
+      id,
+      viewerKey,
+      name: safeName(url.searchParams.get("name"), sameViewer?.att.name ?? `Guest ${this.viewers().length + 1}`)
     };
     server.serializeAttachment(att);
     this.ctx.acceptWebSocket(server, ["viewer"]);
@@ -226,7 +246,7 @@ export class RoomDO extends DurableObject<Env> {
     }
 
     const state = await this.state();
-    this.send(server, this.stateFrame(state, att.id));
+    this.send(server, this.stateFrame(state, viewerKey));
     const host = this.hostSocket();
     if (host) this.send(host, { type: "viewer-joined", id: att.id, name: att.name });
     this.broadcastViewers();
@@ -337,9 +357,9 @@ export class RoomDO extends DurableObject<Env> {
         state.startedAt = Date.now();
         await this.save(state);
         await this.ctx.storage.setAlarm(Date.now() + IDLE_TTL_MS);
-        this.send(ws, { type: "hosted", viewers: this.viewers() });
+        this.send(ws, { type: "hosted", viewers: this.viewers(), connections: this.viewerConnections() });
         for (const viewer of this.viewerSockets()) {
-          this.send(viewer.ws, this.stateFrame(state, viewer.att.id));
+          this.send(viewer.ws, this.stateFrame(state, viewer.att.viewerKey ?? viewer.att.id));
         }
         this.discordChanged();
         return;
@@ -363,12 +383,17 @@ export class RoomDO extends DurableObject<Env> {
           state.hostName = safeName(frame.name, state.hostName);
           await this.save(state);
           for (const viewer of this.viewerSockets()) {
-            this.send(viewer.ws, this.stateFrame(state, viewer.att.id));
+            this.send(viewer.ws, this.stateFrame(state, viewer.att.viewerKey ?? viewer.att.id));
           }
           this.discordChanged();
         } else {
-          const next: ViewerAttachment = { ...att, name: safeName(frame.name, att.name) };
-          ws.serializeAttachment(next);
+          const name = safeName(frame.name, att.name);
+          const viewerKey = att.viewerKey ?? att.id;
+          for (const viewer of this.viewerSockets()) {
+            if ((viewer.att.viewerKey ?? viewer.att.id) === viewerKey) {
+              viewer.ws.serializeAttachment({ ...viewer.att, name } satisfies ViewerAttachment);
+            }
+          }
           this.broadcastViewers();
         }
         return;

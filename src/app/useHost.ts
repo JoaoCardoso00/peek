@@ -19,6 +19,11 @@ export interface Viewer {
   name: string;
 }
 
+interface ViewerConnection {
+  id: string;
+  name: string;
+}
+
 export type HostStatus = "idle" | "starting" | "live";
 
 const THUMB_INTERVAL_MS = 12_000;
@@ -186,9 +191,10 @@ export function useHost(roomId: string, token: string, videoRef: React.RefObject
       switch (frame.type) {
         case "hosted": {
           const list = (frame.viewers as Viewer[]) ?? [];
+          const connections = (frame.connections as ViewerConnection[] | undefined) ?? list;
           setViewers(list);
           setStatus("live");
-          for (const viewer of list) void offerTo(viewer.id);
+          for (const viewer of connections) void offerTo(viewer.id);
           return;
         }
         case "viewer-joined":

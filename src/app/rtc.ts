@@ -2,6 +2,10 @@
 import type { Optimize, Resolution, StreamSettings } from "./identity";
 
 export const VIDEO_MAX_BITRATE = 8_000_000;
+export const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
+  { urls: "stun:stun.cloudflare.com:3478" },
+  { urls: "stun:stun.l.google.com:19302" }
+];
 
 let iceCache: RTCIceServer[] | null = null;
 
@@ -9,12 +13,20 @@ export async function fetchIceServers(): Promise<RTCIceServer[]> {
   if (iceCache) return iceCache;
   try {
     const response = await fetch("/api/ice", { cache: "no-store" });
+    if (!response.ok) throw new Error(`ICE endpoint returned ${response.status}`);
     const body = (await response.json()) as { iceServers?: RTCIceServer[] };
-    iceCache = body.iceServers ?? [];
+    iceCache = body.iceServers?.length ? body.iceServers : DEFAULT_ICE_SERVERS;
   } catch {
-    iceCache = [{ urls: "stun:stun.l.google.com:19302" }];
+    iceCache = DEFAULT_ICE_SERVERS;
   }
   return iceCache;
+}
+
+export function hasTurnServer(servers: RTCIceServer[]): boolean {
+  return servers.some((server) => {
+    const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+    return urls.some((url) => url.startsWith("turn:") || url.startsWith("turns:"));
+  });
 }
 
 /**

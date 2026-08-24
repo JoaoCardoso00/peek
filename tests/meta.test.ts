@@ -43,12 +43,15 @@ describe("safeName", () => {
 
 describe("iceServers", () => {
   it("returns STUN only by default and adds a static TURN when configured", async () => {
-    expect(await iceServers({})).toEqual([{ urls: "stun:stun.l.google.com:19302" }]);
+    expect(await iceServers({})).toEqual([
+      { urls: "stun:stun.cloudflare.com:3478" },
+      { urls: "stun:stun.l.google.com:19302" }
+    ]);
     const withTurn = await iceServers({
       TURN_URL: "turn:a.example:3478, turns:a.example:5349",
       TURN_USERNAME: "u",
       TURN_CREDENTIAL: "p"
     });
-    expect(withTurn[1]).toEqual({ urls: ["turn:a.example:3478", "turns:a.example:5349"], username: "u", credential: "p" });
+    expect(withTurn[2]).toEqual({ urls: ["turn:a.example:3478", "turns:a.example:5349"], username: "u", credential: "p" });
   });
 });

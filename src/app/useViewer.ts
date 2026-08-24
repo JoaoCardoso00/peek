@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getName, setName as persistName } from "./identity";
-import { CandidateQueue, fetchIceServers } from "./rtc";
+import { getName, getOrCreateViewerKey, setName as persistName } from "./identity";
+import { CandidateQueue, fetchIceServers, hasTurnServer } from "./rtc";
 import { Signal, signalUrl, type Frame } from "./signal";
 import type { Viewer } from "./useHost";
 
 export type ViewerStatus = "connecting" | "waiting" | "joining" | "live" | "ended" | "error";
+
+const JOIN_TIMEOUT_MS = 12_000;
+const MAX_AUTOMATIC_RETRIES = 1;
 
 export function useViewer(roomId: string, videoRef: React.RefObject<HTMLVideoElement | null>) {
   const [status, setStatus] = useState<ViewerStatus>("connecting");
@@ -21,6 +24,8 @@ export function useViewer(roomId: string, videoRef: React.RefObject<HTMLVideoEle
   const queueRef = useRef<CandidateQueue | null>(null);
   const iceRef = useRef<RTCIceServer[]>([]);
   const disconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const joinTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const automaticRetries = useRef(0);
 
   const closePeer = useCallback(() => {
     const pc = pcRef.current;
@@ -34,15 +39,30 @@ export function useViewer(roomId: string, videoRef: React.RefObject<HTMLVideoEle
     queueRef.current = null;
     if (disconnectTimer.current) clearTimeout(disconnectTimer.current);
     disconnectTimer.current = null;
+    if (joinTimer.current) clearTimeout(joinTimer.current);
+    joinTimer.current = null;
   }, []);
 
-  /** Rejoin with a fresh viewer id so the host sends a new offer. */
-  const rejoin = useCallback(() => {
+  /** Rejoin with a fresh connection id so the host sends a new offer. */
+  const rejoin = useCallback((automatic = false) => {
     closePeer();
     const signal = signalRef.current;
-    if (!signal) return;
-    signal.close();
+    signal?.close();
     signalRef.current = null;
+
+    if (automatic && automaticRetries.current >= MAX_AUTOMATIC_RETRIES) {
+      const hasTurn = hasTurnServer(iceRef.current);
+      setError(
+        hasTurn
+          ? "Peek could not establish a media connection. Check the network and try again."
+          : "This network needs a TURN relay, but this Peek deployment does not have one configured."
+      );
+      setStatus("error");
+      return;
+    }
+
+    automaticRetries.current = automatic ? automaticRetries.current + 1 : 0;
+    setError(null);
     setStatus("connecting");
     connect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -98,15 +118,22 @@ export function useViewer(roomId: string, videoRef: React.RefObject<HTMLVideoEle
         if (pc.connectionState === "connected") {
           if (disconnectTimer.current) clearTimeout(disconnectTimer.current);
           disconnectTimer.current = null;
+          if (joinTimer.current) clearTimeout(joinTimer.current);
+          joinTimer.current = null;
+          automaticRetries.current = 0;
+          setError(null);
           setStatus("live");
         } else if (pc.connectionState === "failed") {
-          rejoin();
+          rejoin(true);
         } else if (pc.connectionState === "disconnected") {
           disconnectTimer.current = setTimeout(() => {
-            if (pc.connectionState !== "connected") rejoin();
+            if (pc.connectionState !== "connected") rejoin(true);
           }, 4000);
         }
       };
+      joinTimer.current = setTimeout(() => {
+        if (pcRef.current === pc && pc.connectionState !== "connected") rejoin(true);
+      }, JOIN_TIMEOUT_MS);
 
       try {
         await pc.setRemoteDescription(sdp);
@@ -116,7 +143,7 @@ export function useViewer(roomId: string, videoRef: React.RefObject<HTMLVideoEle
         signal.send({ type: "signal", data: { sdp: pc.localDescription } });
       } catch (err) {
         console.error("answer failed", err);
-        rejoin();
+        rejoin(true);
       }
     },
     [attach, closePeer, rejoin]
@@ -130,7 +157,7 @@ export function useViewer(roomId: string, videoRef: React.RefObject<HTMLVideoEle
           setViewers((frame.viewers as Viewer[]) ?? []);
           setYou(String(frame.you));
           if (frame.live) {
-            setStatus((s) => (s === "live" || s === "joining" ? s : "joining"));
+            setStatus((s) => (s === "live" || s === "joining" || s === "error" ? s : "joining"));
           } else {
             closePeer();
             setStatus((s) => (s === "ended" ? s : "waiting"));
@@ -168,7 +195,7 @@ export function useViewer(roomId: string, videoRef: React.RefObject<HTMLVideoEle
 
   const connect = useCallback(() => {
     const signal = new Signal({
-      url: signalUrl(roomId, "viewer", getName() || undefined),
+      url: signalUrl(roomId, "viewer", getName() || undefined, getOrCreateViewerKey()),
       onOpen: () => undefined,
       onFrame: handleFrame,
       onClose: () => {
@@ -216,5 +243,7 @@ export function useViewer(roomId: string, videoRef: React.RefObject<HTMLVideoEle
     signalRef.current?.send({ type: "name", name: value });
   }, []);
 
-  return { status, hostName, viewers, you, name, setName, muted, hasAudio, unmute, mute, error, retry: rejoin };
+  const retry = useCallback(() => rejoin(false), [rejoin]);
+
+  return { status, hostName, viewers, you, name, setName, muted, hasAudio, unmute, mute, error, retry };
 }

@@ -124,7 +124,8 @@ Without TURN, viewers behind symmetric NATs (some mobile carriers, some universi
 
 ## Limits worth knowing
 
-- The sharer uploads one copy of the stream per viewer. At 8 Mbps that is fine for 3 to 5 people; past that, the sharer's upload becomes the bottleneck. Swapping the mesh for an SFU (Cloudflare Realtime SFU or LiveKit) is the next step if that matters.
+- The viewer count treats tabs from the same browser profile as one person. Each tab still needs its own WebRTC connection, so it consumes another copy of the sharer's upload.
+- The sharer uploads one copy of the stream per connection. At 8 Mbps that is fine for 3 to 5 open players; past that, the sharer's upload becomes the bottleneck. Swapping the mesh for an SFU (Cloudflare Realtime SFU or LiveKit) is the next step if that matters.
 - Viewers see the sharer's IP unless a TURN relay is forced, which is how any peer-to-peer call works.
 - Room ownership is the token in `localStorage`. Clearing site data means "Get a new link".
 - Screen capture needs a desktop browser. Watching works on phones.

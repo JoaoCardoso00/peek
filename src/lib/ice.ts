@@ -45,7 +45,9 @@ async function cloudflareTurn(keyId: string, apiToken: string, now: number): Pro
 }
 
 export async function iceServers(env: IceEnv, now = Date.now()): Promise<IceServer[]> {
-  const servers: IceServer[] = [{ urls: env.STUN_URL || "stun:stun.l.google.com:19302" }];
+  const servers: IceServer[] = env.STUN_URL
+    ? [{ urls: env.STUN_URL }]
+    : [{ urls: "stun:stun.cloudflare.com:3478" }, { urls: "stun:stun.l.google.com:19302" }];
   if (env.CF_TURN_KEY_ID && env.CF_TURN_API_TOKEN) {
     servers.push(...(await cloudflareTurn(env.CF_TURN_KEY_ID, env.CF_TURN_API_TOKEN, now)));
   } else if (env.TURN_URL) {

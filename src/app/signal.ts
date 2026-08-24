@@ -88,11 +88,12 @@ export class Signal {
   }
 }
 
-export function signalUrl(roomId: string, role: "host" | "viewer", name?: string): string {
+export function signalUrl(roomId: string, role: "host" | "viewer", name?: string, viewerKey?: string): string {
   const url = new URL("/ws", window.location.href);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.searchParams.set("room", roomId);
   url.searchParams.set("role", role);
   if (name) url.searchParams.set("name", name);
+  if (role === "viewer" && viewerKey) url.searchParams.set("viewer", viewerKey);
   return url.toString();
 }
