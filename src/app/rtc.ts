@@ -148,6 +148,9 @@ export async function captureScreen(settings: StreamSettings): Promise<MediaStre
     selfBrowserSurface: "exclude",
     surfaceSwitching: "include",
     systemAudio: "include",
+    // A shared window carries only that app's sound. System audio would include the
+    // Discord call the viewers are on, so they would hear themselves back.
+    windowAudio: "window",
     monitorTypeSurfaces: "include"
   };
   const stream = await navigator.mediaDevices.getDisplayMedia(constraints);
