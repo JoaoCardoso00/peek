@@ -71,7 +71,9 @@ export function useViewer(roomId: string, videoRef: React.RefObject<HTMLVideoEle
   const attach = useCallback(
     (stream: MediaStream) => {
       const video = videoRef.current;
-      if (!video) return;
+      // ontrack fires once per track. Reassigning srcObject aborts the pending play(),
+      // which the fallback below would mistake for blocked autoplay and mute the video.
+      if (!video || video.srcObject === stream) return;
       video.srcObject = stream;
       // The host always negotiates an audio sender. Only count it once data flows.
       const audioTrack = stream.getAudioTracks()[0];
